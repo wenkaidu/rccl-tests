@@ -534,9 +534,32 @@ void setupArgs(size_t size, ncclDataType_t type, struct threadArgs* args) {
 }
 
 testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName, int root) {
+  int in_place = 1;
+  double maxDelta = 0;
+  bool error = false;
   // Warm-up for large size
   setupArgs(args->maxbytes, type, args);
-  for (int iter = 0; iter < warmup_iters; iter++) {
+  //test validation in single itertion
+  TESTCHECK(args->collTest->initData(args, type, op, root, 0, in_place));
+  TESTCHECK(startColl(args, type, op, root, in_place, 0));
+  TESTCHECK(completeColl(args));
+  TESTCHECK(CheckData(args, type, op, root, in_place, &maxDelta, &error));
+  //aggregate delta from all threads and procs
+  Barrier(args);
+  if (args->thread == 0) {
+    for (int i=1; i<args->nThreads; i++) {
+      maxDelta += args->deltaThreads[i];
+    }
+#ifdef MPI_SUPPORT
+    MPI_Allreduce(MPI_IN_PLACE, &maxDelta, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+    MPI_Allreduce(MPI_IN_PLACE, &error, 1, MPI_C_BOOL, MPI_LOR, MPI_COMM_WORLD);
+#endif
+  }
+  Barrier(args);
+  if (error)
+     PRINT("Data error detected during warm up with %ld bytes: error rate %5.0le\n", args->sendBytes, maxDelta);
+
+  for (int iter = 0; iter < warmup_iters - 1; iter++) {
     TESTCHECK(startColl(args, type, op, root, 0, iter));
   }
   TESTCHECK(completeColl(args));
