@@ -592,6 +592,15 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
   }
   if (blocking_coll) Barrier(args);
+#ifdef MPI_SUPPORT
+  int world_size, world_rank;
+  MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+  MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+  if (world_rank == 0) {
+    system("echo amd123 | sudo -S python3 setup_perf_counter_args.py -m 2; echo amd123 | sudo -S python3 setup_perf_counter_args.py -m 3");
+  }
+  if (blocking_coll) Barrier(args);
+#endif
   return testSuccess;
 }
 
@@ -610,7 +619,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
 
   // Sync
-  TESTCHECK(startColl(args, type, op, root, in_place, 0));
+  TESTCHECK(startColl(args, type, op, root, in_place, 1));
   TESTCHECK(completeColl(args));
 
   Barrier(args);
@@ -634,7 +643,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   for (int iter = 0; iter < iters; iter++) {
     if (agg_iters>1) NCCLCHECK(ncclGroupStart());
     for (int aiter = 0; aiter < agg_iters; aiter++) {
-      TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter));
+      TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter+2));
     }
     if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
   }
