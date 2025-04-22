@@ -527,6 +527,7 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
     char* recvBuff = ((char*)args->recvbuffs[i]) + shift;
     char* sendBuff = ((char*)args->sendbuffs[i]) + shift;
+    char* bias = ((char*)args->bias[i]) + shift;
     ncclRedOp_t op;
 
     if(opIndex < ncclNumOps) {
@@ -574,7 +575,7 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     TESTCHECK(args->collTest->runColl(
           (void*)(in_place ? recvBuff + args->sendInplaceOffset*rank : sendBuff),
           (void*)(in_place ? recvBuff + args->recvInplaceOffset*rank : recvBuff),
-        count, type, op, root, args->comms[i], args->streams[i]));
+        count, type, op, root, args->comms[i], args->streams[i], bias));
 
     #if NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0)
     if(opIndex >= ncclNumOps) {
@@ -969,7 +970,7 @@ testResult_t threadLaunch(struct testThread* thread) {
   return testSuccess;
 }
 
-testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, size_t recvBytes, void **expected, size_t nbytes) {
+testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, size_t recvBytes, void **expected, size_t nbytes, void **bias) {
   if(enable_rotating_tensor) {
     recvBytes = recvBytes + cache_bytes;
     nbytes = nbytes + cache_bytes;
@@ -978,22 +979,26 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
     if(HIP_VERSION >= 50700000) {
       CUDACHECK(hipExtMallocWithFlags(sendbuff, nbytes, hipDeviceMallocUncached));
       CUDACHECK(hipExtMallocWithFlags(recvbuff, nbytes, hipDeviceMallocUncached));
+      if (bias) CUDACHECK(hipExtMallocWithFlags(bias, nbytes, hipDeviceMallocUncached));
       if (datacheck) CUDACHECK(hipExtMallocWithFlags(expected, recvBytes, hipDeviceMallocUncached));
     }
     else {
       CUDACHECK(hipExtMallocWithFlags(sendbuff, nbytes, hipDeviceMallocFinegrained));
       CUDACHECK(hipExtMallocWithFlags(recvbuff, nbytes, hipDeviceMallocFinegrained));
+      if (bias) CUDACHECK(hipExtMallocWithFlags(bias, nbytes, hipDeviceMallocFinegrained));
       if (datacheck) CUDACHECK(hipExtMallocWithFlags(expected, recvBytes, hipDeviceMallocFinegrained));
     }
   }
   else if (memorytype == ncclHost) {
     CUDACHECK(hipHostMalloc(sendbuff, nbytes));
     CUDACHECK(hipHostMalloc(recvbuff, nbytes));
+    if (bias) CUDACHECK(hipHostMalloc(bias, nbytes));
     if (datacheck) CUDACHECK(hipHostMalloc(expected, recvBytes));
   }
   else if (memorytype == ncclManaged) {
     CUDACHECK(cudaMallocManaged(sendbuff, nbytes));
     CUDACHECK(cudaMallocManaged(recvbuff, nbytes));
+    if (bias) CUDACHECK(cudaMallocManaged(bias, nbytes));
     if (datacheck) CUDACHECK(cudaMallocManaged(expected, recvBytes));
 #if 0
     CUDACHECK(cudaMemset(*sendbuff, 0, nbytes));
@@ -1004,9 +1009,11 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
   else {
     CUDACHECK(cudaMalloc(sendbuff, nbytes));
     CUDACHECK(cudaMalloc(recvbuff, nbytes));
+    if (bias) CUDACHECK(cudaMalloc(bias, nbytes));
     if (datacheck) CUDACHECK(cudaMalloc(expected, recvBytes));
   }
   CUDACHECK(hipMemset(*sendbuff, 1, nbytes));
+  if (bias) CUDACHECK(hipMemset(*bias, 0, nbytes));
   if (datacheck) CUDACHECK(hipMemset(*expected, 1, recvBytes));
   return testSuccess;
 }
@@ -1384,6 +1391,7 @@ testResult_t run() {
   void* sendbuffs[nGpus*nThreads];
   void* recvbuffs[nGpus*nThreads];
   void* expected[nGpus*nThreads];
+  void* bias[nGpus*nThreads];
   size_t sendBytes, recvBytes;
 
   ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, (size_t)maxBytes, (size_t)ncclProcs*nGpus*nThreads);
@@ -1393,7 +1401,7 @@ testResult_t run() {
   for (int i=0; i<nGpus*nThreads; i++) {
     gpus[i] = ((gpu0 != -1 ? gpu0 : localRank*nThreads*nGpus) + i)%numDevices;
     CUDACHECK(cudaSetDevice(gpus[i]));
-    TESTCHECK(AllocateBuffs(sendbuffs+i, sendBytes, recvbuffs+i, recvBytes, expected+i, (size_t)maxBytes));
+    TESTCHECK(AllocateBuffs(sendbuffs+i, sendBytes, recvbuffs+i, recvBytes, expected+i, (size_t)maxBytes, bias+i));
     if (streamnull)
       streams[i] = NULL;
     else
@@ -1481,6 +1489,7 @@ testResult_t run() {
     threads[t].args.gpus=gpus+t*nGpus;
     threads[t].args.sendbuffs = sendbuffs+t*nGpus;
     threads[t].args.recvbuffs = recvbuffs+t*nGpus;
+    threads[t].args.bias = bias+t*nGpus;
     threads[t].args.expected = expected+t*nGpus;
     threads[t].args.ncclId = ncclId;
     threads[t].args.comms=comms+t*nGpus;
@@ -1533,6 +1542,7 @@ testResult_t run() {
   for (int i=0; i<nGpus*nThreads; i++) {
     if (sendbuffs[i]) CUDACHECK(cudaFree((char*)sendbuffs[i]));
     if (recvbuffs[i]) CUDACHECK(cudaFree((char*)recvbuffs[i]));
+    if (bias[i]) CUDACHECK(cudaFree((char*)bias[i]));
     if (datacheck) CUDACHECK(cudaFree(expected[i]));
   }
   CUDACHECK(cudaFreeHost(delta));
