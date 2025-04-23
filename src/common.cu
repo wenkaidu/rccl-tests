@@ -20,7 +20,7 @@
 #include <vector>
 #include <utility>
 
-//#define DEBUG_PRINT
+#define DEBUG_PRINT
 
 #include "verifiable.h"
 #include "git_version.h"
@@ -414,7 +414,7 @@ testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
     TESTCHECK(CheckDelta(data, args->expected[i], count, 0, type, op, 0, nranks, wrongPerGpu+i));
 
-#if 1 && DEBUG_PRINT
+#if 1 && defined(DEBUG_PRINT)
     if (args->reportErrors && wrongPerGpu[i] != 0) {
       printf("rank=%d #wrong=%d\n", rank, (int)wrongPerGpu[i]);
       char *expectedHost = (char*)malloc(args->expectedBytes);
@@ -1013,7 +1013,7 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
     if (datacheck) CUDACHECK(cudaMalloc(expected, recvBytes));
   }
   CUDACHECK(hipMemset(*sendbuff, 1, nbytes));
-  if (bias) CUDACHECK(hipMemset(*bias, 0, nbytes));
+  if (bias) CUDACHECK(hipMemset(*bias, 1, nbytes));
   if (datacheck) CUDACHECK(hipMemset(*expected, 1, recvBytes));
   return testSuccess;
 }
