@@ -309,6 +309,11 @@ testResult_t InitDataReduce(void* data, const size_t count, const size_t offset,
   return testSuccess;
 }
 
+testResult_t InitDataApplyBias(void* expected, void* bias, const size_t count, const size_t offset, ncclDataType_t type, ncclRedOp_t op) {
+  ncclVerifiableApplyBias(expected, bias, count, (int)type, (int)op, offset, cudaStreamDefault);
+  return testSuccess;
+}
+
 testResult_t InitData(void* data, const size_t count, size_t offset, ncclDataType_t type, ncclRedOp_t op, uint64_t seed, int nranks, int rank) {
   ncclVerifiablePrepareInput(data, count, (int)type, (int)op, nranks, rank, seed, offset, cudaStreamDefault);
   return testSuccess;

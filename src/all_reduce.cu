@@ -27,7 +27,9 @@ testResult_t AllReduceInitData(struct threadArgs* args, ncclDataType_t type, ncc
     CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
     void* data = in_place ? args->recvbuffs[i] : args->sendbuffs[i];
     TESTCHECK(InitData(data, sendcount, 0, type, op, rep, nranks, rank));
+    TESTCHECK(InitData(args->bias[i], sendcount, 0, type, op, rep+0x12345678, nranks, rank));
     TESTCHECK(InitDataReduce(args->expected[i], recvcount, 0, type, op, rep, nranks));
+    TESTCHECK(InitDataApplyBias(args->expected[i], args->bias[i], recvcount, 0, type, op));
     CUDACHECK(cudaDeviceSynchronize());
   }
   return testSuccess;
