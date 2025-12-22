@@ -568,6 +568,15 @@ testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t*
   return testSuccess;
 }
 
+__global__ void delay_kernel(uint64_t us) {
+  if (threadIdx.x == 0) {
+    uint64_t start = wall_clock64();
+    while ((wall_clock64() - start) <= us*100);
+  }
+  __syncthreads();
+}
+
+
 testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t opIndex, int root, int in_place, int iter) {
   size_t count = args->nbytes / wordSize(type);
 
@@ -639,6 +648,7 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
           (void*)(in_place ? recvBuff + args->sendInplaceOffset*rank : sendBuff),
           (void*)(in_place ? recvBuff + args->recvInplaceOffset*rank : recvBuff),
         count, type, op, root, args->comms[i], args->streams[i], bias));
+    hipLaunchKernelGGL(delay_kernel, dim3(64), dim3(256), 0, args->streams[i], 50);
 
     #if NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0)
     if(opIndex >= ncclNumOps) {
